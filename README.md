@@ -273,6 +273,22 @@ Approximate round trip times in milli-seconds:
 Minimum = 0ms, Maximum = 0ms, Average = 0ms
 C:\>
 ```
+### Updated Device IP Schema:
+
+| Device Name     | Device Type | VLAN | IP Address                                                                       | Subnet Mask     | Default Gateway |
+| --------------- | ----------- | ---- | -------------------------------------------------------------------------------- | --------------- | --------------- |
+| **PLC**         | PLC         | 10   | `192.168.10.10`                                                                  | `255.255.255.0` | `192.168.10.1`  |
+| **HMI**         | PC          | 10   | `192.168.10.11`                                                                  | `255.255.255.0` | `192.168.10.1`  |
+| **Eng-Station** | PC          | 20   | `192.168.20.20`                                                                  | `255.255.255.0` | `192.168.20.1`  |
+| **Historian**   | Server      | 20   | `192.168.20.21`                                                                  | `255.255.255.0` | `192.168.20.1`  |
+| **Router0**     | Router      | N/A  | Sub-Interface VLAN 10: `192.168.10.1` <br> Sub-Interface VLAN 20: `192.168.20.1` | `255.255.255.0` | N/A             |
+
+### Current Network Snapshot:
+
+<img width="561" height="545" alt="Screenshot 2025-08-15 at 5 31 59 PM" src="https://github.com/user-attachments/assets/d6c7267d-3724-41fd-a008-a68437bad00d" />
+
+<img width="611" height="607" alt="Screenshot 2025-08-15 at 5 32 50 PM" src="https://github.com/user-attachments/assets/942e8ca1-a252-4451-a81f-7a32e75e84d8" />
+
 
 
 
