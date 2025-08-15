@@ -132,7 +132,7 @@ This challenge presented a valuable opportunity to adapt the design. Rather than
 
 - A 4331 Router was added to the network to handle all Layer 3 operations; routing and security. 
 
-The physical connection from the switch to the router (GigabitEthernet1/0/5) was configured as a trunk port. This allows the single link to carry traffic for both VLAN 10 and VLAN 20, using 802.1Q tagging to keep them separate. On the router, I created two virtual sub-interfaces (GigabitEthernet0/0/0.10 and GigabitEthernet0/0/0.2-), assigning them the gateway IP addresses for their respective VLANs.
+The physical connection from the switch to the router (GigabitEthernet1/0/5) was configured as a trunk port. This allows the single link to carry traffic for both VLAN 10 and VLAN 20, using 802.1Q tagging to keep them separate. On the router, I created two virtual sub-interfaces (GigabitEthernet0/0/0.10 and GigabitEthernet0/0/0.20), assigning them the gateway IP addresses for their respective VLANs.
 
 ### ***Phase 4: Implementing and Refining ACL Security*** 
 
