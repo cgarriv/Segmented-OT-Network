@@ -285,7 +285,7 @@ C:\>
 
 ### Current Network Snapshot:
 
-<img width="561" height="545" alt="Screenshot 2025-08-15 at 5 31 59 PM" src="https://github.com/user-attachments/assets/d6c7267d-3724-41fd-a008-a68437bad00d" />
+<img width="562" height="543" alt="Screenshot 2025-08-15 at 6 23 12 PM" src="https://github.com/user-attachments/assets/19a8e157-2978-482f-92a8-da570b4b8cd7" />
 
 <img width="611" height="607" alt="Screenshot 2025-08-15 at 5 32 50 PM" src="https://github.com/user-attachments/assets/942e8ca1-a252-4451-a81f-7a32e75e84d8" />
 
