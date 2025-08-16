@@ -10,7 +10,7 @@ The project is built in phases, starting with a basic process control cell and s
 
 ### **_Phase 1_**
 
-My first priority was to establish a stable and reliable foundation for the most critical part of the network: The Process Cell, representing Level 1 of the Purdue Model. This is where devices like PLCs and HMIs operate, so connectivity here must be robust and predictable.
+My first priority was to establish a stable and reliable foundation for the most critical part of the network: The Process Cell, representing Level 1 of the Purdue Model. This is where devices like PLCs and DCS controllers operate, so connectivity here must be robust and predictable.
 
 To begin, I created a simple, flat Layer 2 network. My reasoning for this starting point was to simulate a common scenario in older or smaller industrial sites and build a functional base before adding complexity. Static IP addressing was implemented here for predictability. I designated the 192.168.10.0/24 subnet for this cell.
 
@@ -36,19 +36,20 @@ Approximate round trip times in milli-seconds:
 Minimum = 0ms, Maximum = 9ms, Average = 2ms
 C:\>
 ```
+
 ### **_Phase 2: Segmentation_**
 
-While this flat network was functional, it presented a significant security risk. Any device on the network could directly communicate with the critical PLC. My next objective was to enhance security by implementing network segmentation, a core principle of the Purdue Model. The goal was to logically isolate the Process Cell (Level 1) from the Supervisory Network (Level 2), which would contain devices like an Engineering Workstation and a data-collecting Historian server.
+While this flat network was functional, it presented a significant security risk. Any device on the network could directly communicate with the critical PLC. My next objective was to enhance security by implementing network segmentation, a core principle of the Purdue Model. The goal was to logically isolate the Process Cell (Level 1) from the Supervisory Network (Level 2), which would contain devices like a HMI, an Engineering Workstation and a data-collecting Historian server.
 
 To achieve this, I replaced the basic switch with a Cisco 3650 Layer 3 switch. This device was chosen specifically for its ability to create VLANs and route traffic between them, giving us more control.
 
 My design called for two distinct VLANs:
 
-VLAN 10, named PROCESS_CELL, for the PLC and HMI, using the 192.168.10.0/24 subnet.
+VLAN 10, named PROCESS_CELL, for the PLC using the 192.168.10.0/24 subnet.
 
-VLAN 20, named SUPERVISORY, for the new devices, using separate 192.168.20.0/24 subnet.
+VLAN 20, named SUPERVISORY, for the HMI and new devices, using a separate 192.168.20.0/24 subnet.
 
-This implementation began at the switch’s CLI. First, I created and named the two VLANs. With the logical containers in place, I then assigned the physical switch ports to them. The ports connected to the PLC and HMI were assigned to VLAN 10, while the ports for the Engineering Workstation and Historian were assigned to VLAN 20. This step effectively created two separate, isolated domains.
+This implementation began at the switch’s CLI. First, I created and named the two VLANs. With the logical containers in place, I then assigned the physical switch ports to them. The ports connected to the PLC were assigned to VLAN 10, while the ports for the HMI, Engineering Workstation, and Historian were assigned to VLAN 20. This step effectively created two separate, isolated domains.
 
 ```
 Switch# configure terminal
@@ -57,10 +58,10 @@ Switch(config-vlan)# name PROCESS_CELL
 Switch(config-vlan)# vlan 20
 Switch(config-vlan)# name SUPERVISORY
 Switch(config-vlan)#exit 
-Switch(config)# interface range GigabitEthernet1/0/1 - 2 
+Switch(config)# interface GigabitEthernet1/0/1 
 Switch(config-if-range)# switchport mode access 
 Switch(config-if-range)# switchport access vlan 10 
-Switch(config-if-range)# interface range GigabitEthernet1/0/3 - 4 
+Switch(config-if-range)# interface range GigabitEthernet1/0/2 - 4 
 Switch(config-if-range)# switchport mode access 
 Switch(config-if-range)# switchport access vlan 20 
 Switch(config-if-range)# end
@@ -70,14 +71,13 @@ Switch#show vlan brief
 
 VLAN Name Status Ports
 ---- -------------------------------- --------- ------------------------------
-1 default active Gig1/0/5, Gig1/0/6, Gig1/0/7, Gig1/0/8
-Gig1/0/9, Gig1/0/10, Gig1/0/11, Gig1/0/12
+1 default active Gig1/0/9, Gig1/0/10, Gig1/0/11, Gig1/0/12
 Gig1/0/13, Gig1/0/14, Gig1/0/15, Gig1/0/16
 Gig1/0/17, Gig1/0/18, Gig1/0/19, Gig1/0/20
 Gig1/0/21, Gig1/0/22, Gig1/0/23, Gig1/0/24
 Gig1/1/1, Gig1/1/2, Gig1/1/3, Gig1/1/4
-10 PROCESS_CELL active Gig1/0/1, Gig1/0/2
-20 SUPERVISORY active Gig1/0/3, Gig1/0/4
+10 PROCESS_CELL active Gig1/0/1
+20 SUPERVISORY active Gig1/0/2, Gig1/0/3, Gig1/0/4
 1002 fddi-default active
 1003 token-ring-default active
 1004 fddinet-default active
@@ -90,9 +90,9 @@ Switch#
 With the network segmented into two VLANs, the next logical step was to configure the end devices to reside in their respective subnets. This involved assigning each device a static IP address, a subnet mask, and a Default Gateway.
 
 For the Supervisory Network (VLAN 20):  
-I configured the Engineering Workstation with the IP 192.168.20.20 and the Historian server with 192.168.20.21. Both were assigned 192.168.20.1 as their Default Gateway.
+I configured the Engineering Workstation with the IP 192.168.20.20, The HMI with IP: 192.168.20.21 and the Historian server with 192.168.20.22. All were assigned 192.168.20.1 as their Default Gateway.
 
-Then, I revisited the devices in the Process Cell (VLAN 10). They needed to be updated to include the new gateway. I updated both the PLC and HMI to use 192.168.10.1 as their Default Gateway.
+Then, I revisited the device in the Process Cell (VLAN 10). It needed to be updated to include the new gateway. I updated the PLC to use 192.168.10.1 as its Default Gateway.
 
 **_Step 3: Switch Layer 3 and Routing Configuration_**
 
@@ -111,16 +111,16 @@ Switch(config)# ip routing
 Switch(config)# end
 ```
 
-This configuration completes the implementation of a segmented, multi-VLAN network. To verify functionality, I initiated a ping from the HMI in VLAN 10 to the Engineering Workstation in VLAN 20. The successful replies confirmed that traffic was being routed by the Layer 3 switch between the two isolated networks.
+This configuration completes the implementation of a segmented, multi-VLAN network. To verify functionality, I initiated a ping from the HMI in VLAN 20 to the PLC in VLAN 10. The successful replies confirmed that traffic was being routed by the Layer 3 switch between the two isolated networks.
 
 Current Device IP Schema:
 
 | Device Name     | Device Type | VLAN | IP Address      | Subnet Mask     | Default Gateway |
 | --------------- | ----------- | ---- | --------------- | --------------- | --------------- |
 | **PLC**         | PLC         | 10   | `192.168.10.10` | `255.255.255.0` | `192.168.10.1`  |
-| **HMI**         | PC          | 10   | `192.168.10.11` | `255.255.255.0` | `192.168.10.1`  |
+| **HMI**         | PC          | 20   | `192.168.20.21` | `255.255.255.0` | `192.168.20.1`  |
 | **Eng-Station** | PC          | 20   | `192.168.20.20` | `255.255.255.0` | `192.168.20.1`  |
-| **Historian**   | Server      | 20   | `192.168.20.21` | `255.255.255.0` | `192.168.20.1`  |
+| **Historian**   | Server      | 20   | `192.168.20.22` | `255.255.255.0` | `192.168.20.1`  |
 
 ### ***Phase 3: Overcoming Challenges by Pivoting to Router-on-a-Stick*** 
 
@@ -136,7 +136,7 @@ The physical connection from the switch to the router (GigabitEthernet1/0/5) was
 
 ### ***Phase 4: Implementing and Refining ACL Security*** 
 
-With the ROAS design fully functional, the final step was to implement the security policy. I created an extended named ACL called VLAN10_SEC on the router. The initial policy was to allow the Historian and Engineer Workstations to initiate contact with the Process Cell devices.  
+With the ROAS design fully functional, the final step was to implement the security policy. I created an extended named ACL called VLAN10_SEC on the router. The initial policy was to allow the HMI, Historian and Engineer Workstations to initiate contact with the Process Cell devices.  
 
 However, testing revealed another critical learning opportunity. While the initial ping request from the workstation to the PLC was permitted, the PLC’s reply was blocked. The simulation mode in Packet Tracer showed the return packet being dropped at the router with the message: The packet does not match the criteria of any statement in the access-list.
 ## Packet Tracer Simulation Log
@@ -244,15 +244,15 @@ LAYER 3 (Inbound):
   - >> The packet is denied and dropped by the ACL's implicit deny rule.**
 ```
 
-This demonstrated the stateless nature of standard ACLs. A rule permitting traffic in one direction does not automatically permit the reply. To resolve this, I refined the ACL by adding explicit rules to allow the return traffic from the Process Cell devices back to the Supervisory devices.
+This demonstrated the stateless nature of standard ACLs. A rule permitting traffic in one direction does not automatically permit the reply. To resolve this, I refined the ACL by adding explicit rules to allow the return traffic from the Process Cell device back to the Supervisory devices.
 
 ```
 Router# configure terminal
 Enter configuration commands, one per line.  End with CNTL/Z.
 Router(config)# ip access-list extended VLAN10_SEC
-Router(config-ext-nacl)# permit ip host 192.168.10.10 host 192.168.20.21
 Router(config-ext-nacl)# permit ip host 192.168.10.10 host 192.168.20.20
-Router(config-ext-nacl)# permit ip host 192.168.10.11 host 192.168.20.20
+Router(config-ext-nacl)# permit ip host 192.168.10.10 host 192.168.20.21
+Router(config-ext-nacl)# permit ip host 192.168.10.10 host 192.168.20.22
 Router(config-ext-nacl)# end
 ```
 And finally we had successful ping with 0% packet loss:
@@ -278,14 +278,14 @@ C:\>
 | Device Name     | Device Type | VLAN | IP Address                                                                       | Subnet Mask     | Default Gateway |
 | --------------- | ----------- | ---- | -------------------------------------------------------------------------------- | --------------- | --------------- |
 | **PLC**         | PLC         | 10   | `192.168.10.10`                                                                  | `255.255.255.0` | `192.168.10.1`  |
-| **HMI**         | PC          | 10   | `192.168.10.11`                                                                  | `255.255.255.0` | `192.168.10.1`  |
+| **HMI**         | PC          | 20   | `192.168.20.21`                                                                  | `255.255.255.0` | `192.168.20.1`  |
 | **Eng-Station** | PC          | 20   | `192.168.20.20`                                                                  | `255.255.255.0` | `192.168.20.1`  |
-| **Historian**   | Server      | 20   | `192.168.20.21`                                                                  | `255.255.255.0` | `192.168.20.1`  |
+| **Historian**   | Server      | 20   | `192.168.20.22`                                                                  | `255.255.255.0` | `192.168.20.1`  |
 | **Router0**     | Router      | N/A  | Sub-Interface VLAN 10: `192.168.10.1` <br> Sub-Interface VLAN 20: `192.168.20.1` | `255.255.255.0` | N/A             |
 
 ### Current Network Snapshot:
 
-<img width="562" height="543" alt="Screenshot 2025-08-15 at 6 23 12 PM" src="https://github.com/user-attachments/assets/19a8e157-2978-482f-92a8-da570b4b8cd7" />
+<img width="561" height="544" alt="Screenshot 2025-08-16 at 2 55 00 PM" src="https://github.com/user-attachments/assets/429050b5-646b-4631-ad4b-e61e29090efc" />
 
 <img width="611" height="607" alt="Screenshot 2025-08-15 at 5 32 50 PM" src="https://github.com/user-attachments/assets/942e8ca1-a252-4451-a81f-7a32e75e84d8" />
 
