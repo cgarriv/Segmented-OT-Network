@@ -4,10 +4,45 @@ Christian Garcia Rivero | August 10, 2025 | Cisco Packet Tracer | Purdue Model f
 
 ### **_Overview_**
 
-This document details the creation of a simulated Operational Technology network for a manufacturing environment. The primary objective is to build a secure, segmented, and functional network that demonstrates the foundational principles of industrial network engineering.
+This document details the creation of a simulated Operational Technology network designed for a manufacturing environment. The primary objective is to build a secure, segmented, and functional network that demonstrates the foundational principles of industrial network engineering.
 
-The project is built in phases, starting with a basic process control cell and scaling up to a multi-layered network with routing between segments. This document walks through the design process, implementation, and reasoning behind the creation of a simulated industrial control network.
+The project is built in phases, starting with a basic process control cell and scaling up to a multi-layered, secure network with a DMZ, inter-VLAN routing, and operational hardening. This document walks through the design process, implementation, and reasoning behind the creation of a simulated industrial control network.
 
+### **_Methodologies and Principles:_**
+
+- **Purdue Model for ICS:** The network architecture is based on the Purdue Model, establishing a hierarchical framework to separate critical industrial control systems from other network zones.
+
+- **Network Segmentation:** The core security strategy involves logically isolating the Process Cell (Level 1) from the Supervisory Network (Level 2) and a DMZ (Level 3.5) to control traffic flow and limit the blast radius of potential security incidents.
+
+- **Router-on-a-Stick (ROAS):** This topology was adopted to handle all Layer 3 operations, using a single router to manage routing and security policies for multiple VLANs via a trunk link.
+
+- **Defense-in-Depth:** Security is implemented in layers, starting with VLAN segmentation and progressively adding Access Control Lists (ACLs) and Layer 2 hardening features to create a more resilient and secure environment.
+
+- **Phased Implementation:** The project was built iteratively, starting with a simple flat network and deliberately adding complexity in phases, which allowed for methodical testing and validation at each stage. 
+
+### **_Technologies and Tools_**:
+
+- **Simulation Software **
+	- Cisco Packet Tracer
+
+- **Hardware:**
+	- Cisco ISR 4331 Router 
+	- Cisco 3650-24RS Multilayer Switch
+	- Level 0 Devices: Sensors and Actuators
+	- Level 1 Device: PLC
+	- Data Historian Server
+	- Servers: Patch Server, Relay
+	- PCs: Engineering Workstation, HMI, JumpHost
+
+- **Security Mechanisms:**
+	- **Virtual LANs (VLANs):** Process Cell (VLAN 10), Supervisory network (VLAN 20), DMZ (VLAN 30), and a BLACKHOLE VLAN (VLAN 999).
+	- **Extended Access Control Lists (ACLs)**
+	- **Layer 2 Hardening**: PortFast, BPDU Guard, unused ports shutdown.
+
+- **Operational Tools:**
+	- **Syslog**
+	- **Network Time Protocol (NTP)**
+ 
 ### **_Phase 1_**
 
 My first priority was to establish a stable and reliable foundation for the most critical part of the network: The Process Cell, representing Level 1 of the Purdue Model. This is where devices like PLCs and DCS controllers operate, so connectivity here must be robust and predictable.
