@@ -390,7 +390,7 @@ I repeated the same pattern for the Patch Server and Historian Relay. This mirro
 
 ### 5.2 Policy Enforcement:
 
-I wrote the rules as sentences first, then translated them to ACLs. L2 is allowed to initiate very specific sessions into the DMZ; the DMZ is reply-only back to L2, and completely blocked from initiating to L1. For the PLC path, I intentionally kept Modbus/TCP, DNS3, and EtherNet/IP open from L2 to L1, just for practice purposes.
+I wrote the rules as sentences first, then translated them to ACLs. L2 is allowed to initiate very specific sessions into the DMZ; the DMZ is reply-only back to L2, and completely blocked from initiating to L1. For the PLC path, I intentionally kept Modbus/TCP, DNP3, and EtherNet/IP open from L2 to L1, just for practice purposes.
 ### Router: Update VLAN 20 ACL
 ```
 Router#configure terminal
@@ -427,9 +427,9 @@ Router(config)#ip access-list extended VLAN30_SEC
 Router(config-ext-nacl)#remark Allow return TCP to Supervisory
 Router(config-ext-nacl)#permit tcp 192.168.30.0 0.0.0.255 192.168.20.0 0.0.0.255 established
 Router(config-ext-nacl)#remark Allow ICMP echo-replies back to Supervisory
-Router(config-ext-nacl)#permit icmp 192.168.30.0 0.0.0.255 192.168.20.00 0.0.0.255 echo-reply
+Router(config-ext-nacl)#permit icmp 192.168.30.0 0.0.0.255 192.168.20.0 0.0.0.255 echo-reply
 Router(config-ext-nacl)#remark Block DMZ from initiating to Process Cell
-Router(config-ext-nacl)#deny ip 192.168.30.0 0.0.0.255 192.168.10.00 0.0.0.255
+Router(config-ext-nacl)#deny ip 192.168.30.0 0.0.0.255 192.168.10.0 0.0.0.255
 Router(config-ext-nacl)#remark Log any other DMZ-initiated traffic
 Router(config-ext-nacl)#deny ip any any
 Router(config-ext-nacl)#exit
