@@ -22,7 +22,7 @@ The project is built in phases, starting with a basic process control cell and s
 
 ### **_Technologies and Tools_**:
 
-- **Simulation Software **
+- **Simulation Software**
 	- Cisco Packet Tracer
 
 - **Hardware:**
