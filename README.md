@@ -809,7 +809,7 @@ The next phase of this project will formalize the network’s security policy by
 #### Expanding the Edge with Wireless/IIoT Connectivity:
 
 To support modern industrial devices, the network will be expanded to include a secure wireless segment for IIoT sensors and mobile operator stations. This will be accomplished by developing a new, dedicated VLAN and WLAN secured with WPA2/3 and 802.1x authentication to prevent unauthorized access.
-#### Introducing Redundancy and High Avilability:
+#### Introducing Redundancy and High Availability:
 
 To protect against costly downtime, the final implementation will introduce redundancy to eliminate single point failure. We will achieve gateway redundancy by adding a second router and configuring the Hot Standby Router Protocol (HSRP), which will provide seamless failover. Concurrently, a second multilayer switch will be deployed to provide switch-level redundancy, with critical devices like the PLC and servers connected to both switches. Spanning Tree Protocol will be optimized to manage these redundant paths and prevent network loops. This resilient design will ensure the network can tolerate a critical device or link failure without impacting manufacturing operations.
 
