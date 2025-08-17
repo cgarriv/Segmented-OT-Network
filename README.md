@@ -289,7 +289,499 @@ C:\>
 
 <img width="611" height="607" alt="Screenshot 2025-08-15 at 5 32 50 PM" src="https://github.com/user-attachments/assets/942e8ca1-a252-4451-a81f-7a32e75e84d8" />
 
+### ***Phase 5: ICS DMZ (Level 3.5)*** 
 
+I reached a point where the L1/L2 segmentation and initial ACL policy were solid. The next logical step was to formalize a broker zone between Supervisory (Level 2) and anything “northbound”. I decided to stand up a dedicated ICS DMZ (VLAN 30) with three hosts: A JumpHost for controlled administrative access, a Patch Server for updates and centralized logging, and a Historian Relay to stage data flow out of L2. The design goal was very clear: L2 can initiate toward DMZ for specific services; DMZ cannot initiate towards L2 or L1. This preserves blast-radius control and matches common ICS reference architecture. 
+
+### 5.1 Addressing and topology snapshot 
+
+I created 192.168.30.0/24 for the DMZ and added a third router subinterface on the ROAS link: 
+- JumpHost (PC3): 192.168.30.10/24 
+- Patch Server: 192.168.30.11/24 
+- Historian Relay: 192.168.30.12/24 
+- Router gateway on VLAN 30: 192.168.30.1/24 on G0/0/0.30 
+
+This keeps the mental model simple when I’m reading ACLs later: .10 = JumpHost, .11 = Patch, etc.. The switch keeps doing pure Layer 2 functions; the router enforces all Layer 3 policies. 
+
+#### Router: Create the DMZ subinterface + gateway:
+```
+Router#configure terminal
+Enter configuration commands, one per line. End with CNTL/Z.
+Router(config)#interface GigabitEthernet0/0/0.30
+Router(config-subif)#
+%LINK-3-UPDOWN: Interface GigabitEthernet0/0/0.30, changed state to down
+%LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet0/0/0.30, changed state to up
+
+Router(config-subif)#encapsulation dot1q 30
+Router(config-subif)#ip address 192.168.30.1 255.255.255.0
+Router(config-subif)#no shutdown
+Router(config-subif)#exit
+Router(config)#end
+Router#
+%SYS-5-CONFIG_I: Configured from console by console
+
+Router#show ip interface brief | include 0/0/0.
+GigabitEthernet0/0/0 unassigned YES unset up up
+GigabitEthernet0/0/0.10192.168.10.1 YES manual up up
+GigabitEthernet0/0/0.20192.168.20.1 YES manual up up
+GigabitEthernet0/0/0.30192.168.30.1 YES manual up up
+Router#
+```
+
+#### Map DMZ Access Ports:
+```
+Switch#configure terminal
+Enter configuration commands, one per line. End with CNTL/Z.
+
+Switch(config)#interface GigabitEthernet1/0/6
+Switch(config-if)#description DMZ_JumpHost
+Switch(config-if)#switchport mode access
+Switch(config-if)#switchport access vlan 30
+Switch(config-if)#spanning-tree portfast
+
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/6 but will only
+have effect when the interface is in a non-trunking mode.
+Switch(config-if)#end
+Switch#
+%SYS-5-CONFIG_I: Configured from console by console
+```
+
+I repeated the same pattern for the Patch Server and Historian Relay. This mirrors how I built VLAN 10/20. 
+
+### 5.2 Policy Enforcement:
+
+I wrote the rules as sentences first, then translated them to ACLs. L2 is allowed to initiate very specific sessions into the DMZ; the DMZ is reply-only back to L2, and completely blocked from initiating to L1. For the PLC path, I intentionally kept Modbus/TCP, DNS3, and EtherNet/IP open from L2 to L1, just for practice purposes.
+### Router: Update VLAN 20 ACL
+```
+Router#configure terminal
+
+Enter configuration commands, one per line. End with CNTL/Z.
+
+Router(config)#
+Router(config)#ip access-list extended VLAN20_SEC
+Router(config-ext-nacl)#remark Allow Supervisory hosts to ping their gateway
+Router(config-ext-nacl)#permit icmp 192.168.20.0 0.0.0.255 host 192.168.20.1 echo
+Router(config-ext-nacl)#remark Allow ICMP echo from Supervisory to DMZ (testing)
+Router(config-ext-nacl)#permit icmp 192.168.20.0 0.0.0.255 192.168.30.0 0.0.0.255 echo
+Router(config-ext-nacl)#remark Eng WS -> DMZ JumpHost (RDP)
+Router(config-ext-nacl)#permit tcp host 192.168.20.20 host 192.168.30.10 eq 3389
+Router(config-ext-nacl)#remark Eng WS -> DMZ PatchSrv (HTTPS)
+Router(config-ext-nacl)#permit tcp host 192.168.20.20 host 192.168.30.11 eq 443
+Router(config-ext-nacl)#remark L2 Histortian -> DMZ Historian Relay
+Router(config-ext-nacl)#permit tcp host 192.168.20.22 host 192.168.30.12 eq 443
+Router(config-ext-nacl)#exit
+Router(config)#
+Router(config)#end
+Router#
+%SYS-5-CONFIG_I: Configured from console by console
+```
+
+I validated each flow interactively (RDP to .10, HTTPS to .11/.12) and kept the "443 placeholder" until the real vendor ports are defined.
+### Router: DMZ ACLs
+
+```
+Router#configure terminal
+Enter configuration commands, one per line. End with CNTL/Z.
+
+Router(config)#ip access-list extended VLAN30_SEC
+Router(config-ext-nacl)#remark Allow return TCP to Supervisory
+Router(config-ext-nacl)#permit tcp 192.168.30.0 0.0.0.255 192.168.20.0 0.0.0.255 established
+Router(config-ext-nacl)#remark Allow ICMP echo-replies back to Supervisory
+Router(config-ext-nacl)#permit icmp 192.168.30.0 0.0.0.255 192.168.20.00 0.0.0.255 echo-reply
+Router(config-ext-nacl)#remark Block DMZ from initiating to Process Cell
+Router(config-ext-nacl)#deny ip 192.168.30.0 0.0.0.255 192.168.10.00 0.0.0.255
+Router(config-ext-nacl)#remark Log any other DMZ-initiated traffic
+Router(config-ext-nacl)#deny ip any any
+Router(config-ext-nacl)#exit
+Router(config)#interface GigabitEthernet0/0/0.30
+Router(config-subif)#ip access-group VLAN30_SEC in
+Router(config-subif)#end
+Router#
+%SYS-5-CONFIG_I: Configured from console by console
+```
+
+The single deny protects the cell boundary regardless of which DMZ host is compromised. The established and echo-reply lines preserve usability and my ability to test.
+
+I documented all stacks to show options and gain practice on all of them. 
+#### Modbus/TCP (502) - HMI + Eng WS to PLC
+```
+Router#configure terminal
+Enter configuration commands, one per line. End with CNTL/Z.
+
+Router(config)#ip access-list extended VLAN10_SEC
+Router(config-ext-nacl)#remark Modbus/TCP from L2 to PLC
+Router(config-ext-nacl)#permit tcp host 192.168.20.21 host 192.168.10.10 eq 502
+Router(config-ext-nacl)#permit tcp host 192.168.20.20 host 192.168.10.10 eq 502
+Router(config-ext-nacl)#exit
+Router(config)#end
+Router#
+%SYS-5-CONFIG_I: Configured from console by console
+```
+
+#### EtherNet/IP CIP (TCP 44818, UDP 2222) - HMI + Eng WS to PLC
+```
+Router#configure terminal
+Enter configuration commands, one per line.  End with CNTL/Z.
+
+Router(config)#ip access-list extended VLAN10_SEC
+Router(config-ext-nacl)#remark EtherNet/IP CIP from L2 to PLC
+Router(config-ext-nacl)#permit tcp host 192.168.20.21 host 192.168.10.10 eq 44818
+Router(config-ext-nacl)#permit tcp host 192.168.20.20 host 192.168.10.10 eq 44818
+Router(config-ext-nacl)#permit udp host 192.168.20.20 host 192.168.10.10 eq 2222
+Router(config-ext-nacl)#permit udp host 192.168.20.21 host 192.168.10.10 eq 2222
+Router(config-ext-nacl)#exit
+Router(config)#end
+Router#
+%SYS-5-CONFIG_I: Configured from console by console
+```
+
+#### DNP3 (TCP 20000) 
+```
+Router#configure terminal
+Enter configuration commands, one per line.  End with CNTL/Z.
+
+Router(config)#ip access-list extended VLAN10_SEC
+Router(config-ext-nacl)#remark DNP3 from L2 to PLC
+Router(config-ext-nacl)#permit tcp host 192.168.20.21 host 192.168.10.10 eq 20000
+Router(config-ext-nacl)#permit tcp host 192.168.20.20 host 192.168.10.10 eq 20000
+Router(config-ext-nacl)#exit
+Router(config)#end
+Router#
+%SYS-5-CONFIG_I: Configured from console by console
+```
+
+This preserves the original intent from earlier phases of explicit host/port tuples and reply allowances, now extended to cover OT protocols.
+
+### 5.3 Validation
+
+I validated each allowed service from L2 and intentionally attempted disallowed initiations from DMZ to verify the denies. Packet Tracer makes these quick to demonstrate: from PC2 I connected to the JumpHost via RDP and the Patch Server and Historian Relay over HTTPS; from PC3 I tried to ping the PLC and the Engineering Workstation to show hard failure with the router answering “unreachable” (a good sign the ACLs are doing their job at the gateway).
+
+#### PC2 (192.168.20.20) should succeed
+```
+C:\>ping 192.168.30.10
+
+Pinging 192.168.30.10 with 32 bytes of data:
+
+Reply from 192.168.30.10: bytes=32 time=1ms TTL=127
+Reply from 192.168.30.10: bytes=32 time<1ms TTL=127
+Reply from 192.168.30.10: bytes=32 time<1ms TTL=127
+Reply from 192.168.30.10: bytes=32 time=2ms TTL=127
+
+Ping statistics for 192.168.30.10:
+Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),
+Approximate round trip times in milli-seconds:
+Minimum = 0ms, Maximum = 2ms, Average = 0ms
+C:\>
+```
+
+#### DMZ JumpHost (192.168.30.10) to Supervisory should fail cannot initiate to VLAN 20
+
+```
+C:\>ping 192.168.20.20
+
+Pinging 192.168.20.20 with 32 bytes of data:
+
+Reply from 192.168.30.1: Destination host unreachable.
+Reply from 192.168.30.1: Destination host unreachable.
+Reply from 192.168.30.1: Destination host unreachable.
+Reply from 192.168.30.1: Destination host unreachable.
+
+Ping statistics for 192.168.20.20:
+Packets: Sent = 4, Received = 0, Lost = 4 (100% loss),
+C:\>
+```
+#### DMZ JumpHost (192.168.30.10) to Process Cell should fail cannot initiate to VLAN 10
+
+```
+C:\>ping 192.168.10.10
+
+Pinging 192.168.10.10 with 32 bytes of data:
+
+Reply from 192.168.30.1: Destination host unreachable.
+Reply from 192.168.30.1: Destination host unreachable.
+Reply from 192.168.30.1: Destination host unreachable.
+Reply from 192.168.30.1: Destination host unreachable.
+
+Ping statistics for 192.168.10.10:
+Packets: Sent = 4, Received = 0, Lost = 4 (100% loss),
+C:\>
+```
+
+### ***Phase 6: Visibility and Operational Hardening***
+
+At this point I wanted two operational guarantees: I can see what's happening (central logs, correct timestamps), and the L2 fabric is tidy and predictable.
+
+#### 6.1 Central Syslog and Time:
+
+For the lab, I used the router as the authoritative time source (NTP master, stratum 4) and pointed network devices at the Patch Server (192.168.30.11) for syslog. In production I would replace the NTP master line with real upstream servers.
+#### Central time + Logs (DMZ PatchSrv as NTP/Syslog)
+
+```
+Router#configure terminal
+Enter configuration commands, one per line.  End with CNTL/Z.
+
+Router(config)#service timestamps log datetime msec
+Router(config)#logging host 192.168.30.11
+Router(config)#logging trap
+Router(config)#logging buffered 8192
+Router(config)#
+*Mar 01, 08:21:57.2121: SYS-5-LOG_CONFIG_CHANGE: Buffer logging: level debugging, xml disabled, filtering disabled, size (8192) 
+Router(config)#end
+Router#
+*Mar 01, 08:22:03.2222: SYS-5-CONFIG_I: Configured from console by console
+-------------------------------------------------------------------------------------------------------------
+Switch(config)#service timestamps log datetime msec
+Switch(config)#logging host 192.168.30.11
+Switch(config)#logging trap
+Switch(config)#end
+Switch#
+*Mar 01, 08:56:19.5656: SYS-5-CONFIG_I: Configured from console by console
+```
+
+#### NTP Demo (ROUTER):
+
+```
+
+Router#show ntp status
+Clock is synchronized, stratum 4, reference is 127.127.1.1
+nominal freq is 250.0000 Hz, actual freq is 249.9990 Hz, precision is 2**24
+reference time is FFFFFFFFEC1F4362.00000172 (8:50:42.370 UTC Sat Aug 16 2025)
+clock offset is 0.00 msec, root delay is 0.00  msec
+root dispersion is 0.00 msec, peer dispersion is 0.24 msec.
+loopfilter state is 'CTRL' (Normal Controlled Loop), drift is - 0.000001193 s/s system poll interval is 5, last update was 18 sec ago.
+Router#show ntp associations
+
+address         ref clock       st   when     poll    reach  delay          offset            disp
+*~127.127.1.1   .LOCL.          3    28       64      377    0.00           0.00              0.24
+ * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured
+ * 
+Router#show clock
+8:51:13.543 UTC Sat Aug 16 2025
+
+
+```
+#### Syslog Demo:
+
+```
+Router#show access-lists VLAN30_SEC
+Extended IP access list VLAN30_SEC
+    permit tcp 192.168.30.0 0.0.0.255 192.168.20.0 0.0.0.255 established
+    permit icmp 192.168.30.0 0.0.0.255 192.168.20.0 0.0.0.255 echo-reply (21 match(es))
+    deny ip any any (81 match(es))
+    permit icmp 192.168.30.0 0.0.0.255 host 192.168.30.1 echo-reply
+    permit udp host 192.168.30.11 eq 123 host 192.168.30.1
+    deny ip 192.168.30.0 0.0.0.255 192.168.10.0 0.0.0.255
+    permit udp host 192.168.30.11 eq 123 host 192.168.30.1 range 1024 65535
+    permit udp host 192.168.30.11 eq 123 host 192.168.30.1 eq 123
+
+Router#show logging
+Syslog logging: enabled (0 messages dropped, 0 messages rate-limited,
+          0 flushes, 0 overruns, xml disabled, filtering disabled)
+
+No Active Message Discriminator.
+
+
+No Inactive Message Discriminator.
+
+
+    Console logging: level debugging, 32 messages logged, xml disabled,
+          filtering disabled
+    Monitor logging: level debugging, 32 messages logged, xml disabled,
+          filtering disabled
+    Buffer logging:  level debugging, 0 messages logged, xml disabled,
+          filtering disabled
+
+    Logging Exception size (8192 bytes) 
+    Count and timestamp logging messages: disabled
+    Persistent logging: disabled
+
+No active filter modules.
+
+ESM: 0 messages dropped
+    Trap logging: level informational, 32 message lines logged
+        Logging to 192.168.30.11  (udp port 514,  audit disabled,
+             authentication disabled, encryption disabled, link up),
+             14 message lines logged,
+             0 message lines rate-limited,
+             0 message lines dropped-by-MD,
+             xml disabled, sequence number disabled
+             filtering disabled
+
+Log Buffer (8192 bytes):
+
+```
+
+#### Syslog Demo 2:
+<img width="802" height="329" alt="Screenshot 2025-08-16 at 9 01 49 PM" src="https://github.com/user-attachments/assets/64084144-79c6-4e13-a60f-15fbb8dff454" />
+
+### 6.2 L2 Hygiene: Trunk/Native, Blackhole VLAN, and Edge Guardrails:
+
+I locked down the trunk to the router, moved the native to a BLACKHOLE VLAN, and parked/disabled unused access ports there. On edge ports I enabled PortFast and BPDU Guard so a stray loop can't form from a mis-patch.
+
+#### Trunk + Port Hygiene
+```
+Switch>enable
+Switch#configure terminal
+Enter configuration commands, one per line.  End with CNTL/Z.
+
+Switch(config)#vlan 999
+Switch(config-vlan)#name BLACKHOLE
+Switch(config-vlan)#exit
+Switch(config)#interface GigabitEthernet1/0/5
+Switch(config-if)#switchport trunk allowed vlan 10,20,30,999
+Switch(config-if)#switchport trunk native vlan 999
+Switch(config-if)#end
+Switch#
+%SYS-5-CONFIG_I: Configured from console by console
+
+Switch(config)#interface range GigabitEthernet1/0/9 - 24
+Switch(config-if-range)#switchport mode access
+Switch(config-if-range)#switchport access vlan 999
+Switch(config-if-range)#shutdown
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/9, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/10, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/11, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/12, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/13, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/14, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/15, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/16, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/17, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/18, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/19, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/20, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/21, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/22, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/23, changed state to administratively down
+
+%LINK-5-CHANGED: Interface GigabitEthernet1/0/24, changed state to administratively down
+Switch(config-if-range)#end
+Switch#
+%SYS-5-CONFIG_I: Configured from console by console
+
+
+Switch(config)#! HMI/servers/DMZ ports
+Switch(config)#interface range GigabitEthernet1/0/1 - 4, GigabitEthernet1/0/6 - 8
+Switch(config-if-range)#spanning-tree portfast
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface  when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/1 but will only
+have effect when the interface is in a non-trunking mode.
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface  when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/2 but will only
+have effect when the interface is in a non-trunking mode.
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface  when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/3 but will only
+have effect when the interface is in a non-trunking mode.
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface  when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/4 but will only
+have effect when the interface is in a non-trunking mode.
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface  when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/6 but will only
+have effect when the interface is in a non-trunking mode.
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface  when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/7 but will only
+have effect when the interface is in a non-trunking mode.
+%Warning: portfast should only be enabled on ports connected to a single
+host. Connecting hubs, concentrators, switches, bridges, etc... to this
+interface  when portfast is enabled, can cause temporary bridging loops.
+Use with CAUTION
+
+%Portfast has been configured on GigabitEthernet1/0/8 but will only
+have effect when the interface is in a non-trunking mode.
+Switch(config-if-range)#spanning-tree bpduguard enable
+Switch(config-if-range)#storm-control broadcast level 5.00	
+Switch(config-if-range)#end
+Switch#
+%SYS-5-CONFIG_I: Configured from console by console
+```
+
+### Updated Device IP Schema (Post-DMZ):
+
+| Device                 | Type       | VLAN | IP Address                                                                | Subnet Mask   | Default Gateway |
+| ---------------------- | ---------- | ---- | ------------------------------------------------------------------------- | ------------- | --------------- |
+| PLC0                   | PLC        | 10   | 192.168.10.10                                                             | 255.255.255.0 | 192.168.10.1    |
+| Sensors and Actuators  | L0 Devices | 10   | —                                                                         | —             | —               |
+| PC2 (Engineering WS)   | PC         | 20   | 192.168.20.20                                                             | 255.255.255.0 | 192.168.20.1    |
+| PC1 (HMI)              | PC         | 20   | 192.168.20.21                                                             | 255.255.255.0 | 192.168.20.1    |
+| Server0 (Historian)    | Server     | 20   | 192.168.20.22                                                             | 255.255.255.0 | 192.168.20.1    |
+| PC3 (JumpHost)         | PC         | 30   | 192.168.30.10                                                             | 255.255.255.0 | 192.168.30.1    |
+| Patch Server           | Server     | 30   | 192.168.30.11                                                             | 255.255.255.0 | 192.168.30.1    |
+| Data Historian (Relay) | Server     | 30   | 192.168.30.12                                                             | 255.255.255.0 | 192.168.30.1    |
+| Router0 (ISR4331)      | ROAS       | —    | Gi0/0/0.10=192.168.10.1, Gi0/0/0.20=192.168.20.1, Gi0/0/0.30=192.168.30.1 | 255.255.255.0 | —               |
+
+### Test Matrix
+
+| Test                  | Source → Dest                    | Protocol/Port                               | Expected result                  |
+| --------------------- | -------------------------------- | ------------------------------------------- | -------------------------------- |
+| Eng WS → JumpHost     | 192.168.20.20 → 192.168.30.10    | TCP 3389                                    | RDP connects (allowed)           |
+| Eng WS → Patch Server | 192.168.20.20 → 192.168.30.11    | TCP 443                                     | HTTPS loads (allowed)            |
+| Historian → Relay     | 192.168.20.22 → 192.168.30.12    | TCP 443                                     | HTTPS loads (allowed)            |
+| JumpHost → Eng WS     | 192.168.30.10 → 192.168.20.20    | any                                         | Fails; ACL deny increments       |
+| JumpHost → PLC        | 192.168.30.10 → 192.168.10.10    | any                                         | Fails; ACL deny increments       |
+| HMI/WS → PLC          | 192.168.20.21/20 → 192.168.10.10 | TCP 502 / TCP 44818 (+ UDP 2222 if modeled) | PLC reachable (allowed)          |
+| Syslog delivery       | Router/Switch → 192.168.30.11    | UDP 514                                     | Events land with timestamps      |
+| Time                  | Router (master)                  | NTP                                         | `show ntp status` = synchronized |
+
+### ***Phase 7: Future Work***
+
+#### Formalizing Security with a Zone-Based Firewall:
+
+The next phase of this project will formalize the network’s security policy by migrating from interface-based ACLs to a more powerful Zone-Based Firewall. A ZBF is stateful by nature, which will automatically handle return traffic and simplify rule sets.
+#### Expanding the Edge with Wireless/IIoT Connectivity:
+
+To support modern industrial devices, the network will be expanded to include a secure wireless segment for IIoT sensors and mobile operator stations. This will be accomplished by developing a new, dedicated VLAN and WLAN secured with WPA2/3 and 802.1x authentication to prevent unauthorized access.
+#### Introducing Redundancy and High Avilability:
+
+To protect against costly downtime, the final implementation will introduce redundancy to eliminate single point failure. We will achieve gateway redundancy by adding a second router and configuring the Hot Standby Router Protocol (HSRP), which will provide seamless failover. Concurrently, a second multilayer switch will be deployed to provide switch-level redundancy, with critical devices like the PLC and servers connected to both switches. Spanning Tree Protocol will be optimized to manage these redundant paths and prevent network loops. This resilient design will ensure the network can tolerate a critical device or link failure without impacting manufacturing operations.
+
+### Current Network Snapshot:
+<img width="823" height="635" alt="Screenshot 2025-08-17 at 12 13 35 AM" src="https://github.com/user-attachments/assets/c0e6451c-b90c-4f15-bf40-90954ebae93a" />
+
+<img width="401" height="696" alt="Screenshot 2025-08-16 at 11 48 35 PM" src="https://github.com/user-attachments/assets/8da7c63d-0bc3-4162-bcf1-bd6814b0c40d" />
 
 
 
